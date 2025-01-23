@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+   <meta charset="UTF-8">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+   <title>DAB Receiver Control</title>
+   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+   <style>
+     body { font-family: Arial, sans-serif; }
+     #slideshow { max-width: 300px; }
+     .chart-container { 
+       max-width: 600px; 
+       margin: 20px auto; 
+     }
+   </style>
+</head>
+<body>
+   <h1>DAB Receiver Control</h1>
+   <h1 id="ensemble">DAB Receiver Control</h1>
+
+   <h2>Available Services</h2>
+   <ul id="services"></ul>
+
+   <h2>Slideshow</h2>
+   <img id="slideshow" src="" alt="Slideshow" style="display: none;"/>
+
+   <h2>Signal Strength</h2>
+   <div class="chart-container">
+     <canvas id="signalChart"></canvas>
+   </div>
+
+   <h2>Signal Info</h2>
+   <pre id="signal"></pre>
+
+   <h2>DLS output</h2>
+   <p id="nowplaying"></p>
+
+   <script src="/socket.io/socket.io.js"></script>
+   <script>
+     const socket = io();
+     let services = {};
+     let frequency = "";
+     let changedData = false;
+     let ensemble = "";
+     let signalChart;
+     const MAX_POINTS = 30;
+     const signalDataPoints = [];
+     const labels = [];
+
+     const ctx = document.getElementById('signalChart').getContext('2d');
+     signalChart = new Chart(ctx, {
+       type: 'line',
+       data: {
+         labels: labels,
+         datasets: [{
+           label: 'Signal Strength',
+           data: signalDataPoints,
+           borderColor: 'rgb(75, 192, 192)',
+           backgroundColor: 'rgba(75, 192, 192, 0.2)', 
+           pointBackgroundColor: 'rgb(75, 192, 192)', 
+           pointRadius: 5,
+           pointHoverRadius: 7,
+           fill: true
+         }]
+       },
+       options: {
+         responsive: true,
+         animation: false, // Completely disable animations
+         animations: {
+           enabled: false // Additional disabling for newer Chart.js versions
+         },
+         scales: {
+           y: {
+             beginAtZero: true,
+             max: 50,
+             title: {
+               display: true,
+               text: 'Signal Strength (%)'
+             }
+           },
+           x: {
+             title: {
+               display: true,
+               text: 'Time'
+             }
+           }
+         }
+       }
+     });
+
+     socket.on('services', (services) => {
+       const servicesList = document.getElementById('services')
+       services.textContent = "";
+       servicesList.innerHTML = '';
+       services["services"].forEach(service => {
+         const id = service.split(";")[1]
+         const name = service.split(";")[0]
+         const li = document.createElement('li');
+         const button = document.createElement('button');
+         button.onmousedown = function() {
+           socket.emit('changeChannel', {channelId: id})
+         }
+         button.textContent = name;
+         
+         li.appendChild(button);
+         servicesList.appendChild(li);
+       });
+     });
+
+     socket.on('slideshow', (base64Image) => {
+       const slideshowElement = document.getElementById('slideshow');
+       if (base64Image) {
+         slideshowElement.style.display = 'block';
+         slideshowElement.src = 'data:image/png;base64,' + base64Image;
+       } else {
+         slideshowElement.style.display = 'none';
+       }
+     });
+
+     socket.on('signalData', (signalData) => {
+       const signalElement = document.getElementById('signal');
+       const nowplaying = document.getElementById('nowplaying');
+       
+       signalElement.textContent = JSON.stringify(signalData, null, 2);
+       nowplaying.textContent = signalData["dls"];
+
+       if(signalData["ensemblename"] != ensemble) {
+         document.getElementById("ensemble").textContent = signalData["ensemblename"];
+         services = signalData["services"];
+       }
+
+       let signalStrength = 0;
+       if (signalData.signal !== undefined) {
+         signalStrength = parseFloat(signalData.signal);
+       } else if (signalData.signals !== undefined) {
+         signalStrength = parseFloat(signalData.signals);
+       }
+
+       const currentTime = new Date().toLocaleTimeString();
+
+       if (!isNaN(signalStrength)) {
+         // If we've reached max points, remove the first point
+         if (signalDataPoints.length >= MAX_POINTS) {
+           signalDataPoints.shift();
+           labels.shift();
+         }
+
+         // Add new point
+         signalDataPoints.push(signalStrength);
+         labels.push(currentTime);
+
+         // Update the chart without animations
+         signalChart.update('none');
+       }
+     });
+
+     function enableConnection(enable) {
+       socket.emit('enableConnection', enable);
+     }
+   </script>
+</body>
+</html>
